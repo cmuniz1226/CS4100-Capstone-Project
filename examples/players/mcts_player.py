@@ -1,6 +1,5 @@
 from .emulator_player import EmulatorPlayer, MyModel
 from pypokerengine.engine.poker_constants import PokerConstants as Const
-import random
 import math
 
 NUM_PLAYOUTS = 1000
@@ -15,9 +14,19 @@ class MCTSPlayer(EmulatorPlayer):
         actions_and_results = {action: 0 for action in ACTIONS}
         for action in actions_and_results:
             self.my_model.set_action(action)
+            emulator_game_state = self._setup_game_state(round_state, hole_card)
+            mcts_root = MCTSNode(self.emulator, emulator_game_state, self.uuid,
+                                 declare_action_args=[valid_actions, hole_card, round_state])
+            leaf_node = mcts_root
             for _ in range(NUM_PLAYOUTS):
-                emulator_game_state = self._setup_game_state(round_state, hole_card)
-                mcts_root = MCTSNode(self.emulator, emulator_game_state, declare_action_args=[valid_actions, hole_card, round_state])
+                leaf_node = leaf_node.select_leaf()
+                leaf_node.simulate_playout()
+
+            actions_and_results[action] = mcts_root.propagated_state_value
+
+        best_action = max(actions_and_results, key=actions_and_results.get)
+        self.my_model.set_action(best_action)
+        return self.my_model.declare_action(valid_actions, hole_card, round_state)
 
     def receive_round_start_message(self, round_count, hole_card, seats):
         pass
@@ -33,12 +42,16 @@ class MCTSPlayer(EmulatorPlayer):
 
 
 class MCTSNode:
-    def __init__(self, emulator, current_game_state, model=MyModel(), declare_action_args=None, parent=None):
+    def __init__(self, emulator, current_game_state, uuid, model=MyModel(), declare_action_args=None, parent=None):
         self.emulator = emulator
         self.game_state = current_game_state
+        self.uuid = uuid
         self.model = model
         self.declare_action_args = declare_action_args
         self.parent = parent
+        self.initial_state = current_game_state
+        if self.parent is not None:
+            self.initial_state = self.parent.initial_state
         self.children = []
         self.num_playouts = 0
         self.propagated_state_value = 0
@@ -82,15 +95,18 @@ class MCTSNode:
 
     def expand(self):
         """
-        Generates 
+        Generates the next node that does not have any playouts to simulate
+        The MCTSNode that this function is called on cannot have any children (must be a leaf node)
         """
+        assert len(self.children) == 0, "Node being expanded is not a leaf"
+
         if self.num_playouts == 0:
             return self
         else:
             self.generate_children()
             return self.children[0]
 
-    def simulate_playout(self, node):
+    def simulate_playout(self):
         """
         Runs simulated playouts of the round by selecting random actions (for both the agent and its opponents)
         until a terminal state is reached (the simulated round is over).
@@ -99,12 +115,14 @@ class MCTSNode:
             next_node = self.expand()
             round_end_state, _ = self.emulator.run_until_round_finish(next_node.game_state)
             next_node.num_playouts += 1
-            
+            next_node.propagated_state_value = ((next_node.propagated_state_value * (next_node.num_playouts - 1)) +
+                                                next_node.compute_state_value(round_end_state)) / next_node.num_playouts
             next_node.back_propogation()
+        else:
+            self.back_propagation()
         # Nodes generated from simulating actions are not kept in the tree.
         # use this to determine if round is over
         # TODO: Understand application of actions by emulator
-        # TODO: Ensure opponent actions are random.
 
     def _is_terminal_state(self):
         """
@@ -128,21 +146,22 @@ class MCTSNode:
         Recursively propagates state value information back up the tree. This is called after rollout/playout simulation 
         is completed. Backpropagation ends when we hit the root node.
         """
-        self.propagated_state_value = sum([child.propagated_state_value for child in self.children])
-        self.num_playouts = sum([child.num_playouts for child in self.children])
+        # don't compute these values for terminal state; terminal state has no children so the values would be set to 0
+        if not self._is_terminal_state():
+            self.propagated_state_value = sum([child.propagated_state_value for child in self.children])
+            self.num_playouts = sum([child.num_playouts for child in self.children])
+
         if self.parent is not None:
             self.parent.back_propagation()
 
-def compute_state_value(initial_state, game_state):
-    """
-    Given the initial game state and the current game state, computes and returns its value relative 
-    to how much money an agent has lost/gained. If the current state is not terminal, return zero.
-    """
-    if game_state["street"] == Const.Street.FINISHED:
-        # TODO: How to compute difference in stacks before and after the round is over?
-        # Use initial_state
-        # Get Player
-        pass
-    else:
-        return 0
-
+    def compute_state_value(self, final_state):
+        """
+        Given the initial game state, player id, and the final game state, computes and returns its value relative
+        to how much money an agent has lost/gained. If the current state is not terminal, return zero.
+        """
+        if final_state["street"] == Const.Street.FINISHED:
+            initial_stack = [player for player in self.initial_state['table'].seats.players if player.uuid == self.uuid][0].stack
+            final_stack = [player for player in final_state['table'].seats.players if player.uuid == self.uuid][0].stack
+            return final_stack - initial_stack
+        else:
+            return 0
