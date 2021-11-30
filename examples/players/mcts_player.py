@@ -1,9 +1,12 @@
 from .emulator_player import EmulatorPlayer, MyModel
 from pypokerengine.engine.poker_constants import PokerConstants as Const
 import random
+import math
 
 NUM_PLAYOUTS = 1000
 ACTIONS = [MyModel.FOLD, MyModel.CALL, MyModel.MIN_RAISE, MyModel.MAX_RAISE]
+
+UCB1_EXPLORATION_CONSTANT = math.sqrt(2)
 
 
 class MCTSPlayer(EmulatorPlayer):
@@ -38,10 +41,15 @@ class MCTSNode:
         self.parent = parent
         self.children = []
         self.num_playouts = 0
-        self.num_wins = 0
-        self._generate_children()
+        self.propagated_state_value = 0
 
-    def _generate_children(self):
+    def generate_children(self):
+        """
+        Based on the actions available based on the current state of the game, generate child nodes to
+        this node and append them to self.children.
+
+        SIDE EFFECT: Mutates self.children. 
+        """
         for a in ACTIONS:
             self.model.set_action(a)
             real_action, amount = self.model.declare_action(*self.declare_action_args)
@@ -50,26 +58,91 @@ class MCTSNode:
             self.children.append(MCTSNode(self.emulator, new_state, declare_action_args=new_args, parent=self))
 
     def select_leaf(self):
-        leaf = None
-        for child in self.children:
-            if child.num_playouts == 0:
-                leaf = child
-                break
-
-        if leaf is None:
-            for child in self.children:
-                leaf = child.select_leaf()
-                if leaf is not None:
-                    break
-
+        """
+        Select a leaf node based on the number of the node's children (should be zero). Selects the child with the maximum 
+        UCB1 value at each child iteration.
+        """
+        leaf = self
+        while len(leaf.children) != 0:
+            leaf = self._get_max_child()
         return leaf
 
-    @staticmethod
-    def _expand(node):
-        return random.choice(node.children)
+    def _get_max_child(self):
+        """
+        Given the children of a MCTSNode, return the node with the highest UCB1 value.
+        """
+        bestNode = None
+        bestUCBValue = math.inf * -1
+        for child_node in self.children:
+            childValue = child_node.selection_policy_value()
+            if bestUCBValue < childValue:
+                bestUCBValue = childValue
+                bestNode = child_node
+        return bestNode
+
+    def expand(self):
+        """
+        Generates 
+        """
+        if self.num_playouts == 0:
+            return self
+        else:
+            self.generate_children()
+            return self.children[0]
 
     def simulate_playout(self, node):
-        next_node = MCTSNode._expand(node) # only do this if this is not terminal state
-        is_round_finished = next_node.game_state["street"] == Const.Street.FINISHED # use this to determine if round is over
+        """
+        Runs simulated playouts of the round by selecting random actions (for both the agent and its opponents)
+        until a terminal state is reached (the simulated round is over).
+        """
+        if not self._is_terminal_state():
+            next_node = self.expand()
+            round_end_state, _ = self.emulator.run_until_round_finish(next_node.game_state)
+            next_node.num_playouts += 1
+            
+            next_node.back_propogation()
+        # Nodes generated from simulating actions are not kept in the tree.
+        # use this to determine if round is over
+        # TODO: Understand application of actions by emulator
+        # TODO: Ensure opponent actions are random.
 
-    # TODO: maybe add helpers for expansion and back-propogation
+    def _is_terminal_state(self):
+        """
+        Determines if this state is a terminal state (street is set to finished). Returns true if so, else false.
+        """
+        return self.game_state["street"] == Const.Street.FINISHED
+
+    def selection_policy_value(self):
+        """
+        Computes and returns the UCB1 selection policy for this node.
+        """
+        exploitation_value = self.propagated_state_value / self.num_playouts
+
+        exploration_value = math.sqrt(math.log(self.parent.num_playouts) / self.num_playouts)
+        exploration_value *= UCB1_EXPLORATION_CONSTANT
+
+        return exploitation_value + exploration_value
+
+    def back_propagation(self):
+        """
+        Recursively propagates state value information back up the tree. This is called after rollout/playout simulation 
+        is completed. Backpropagation ends when we hit the root node.
+        """
+        self.propagated_state_value = sum([child.propagated_state_value for child in self.children])
+        self.num_playouts = sum([child.num_playouts for child in self.children])
+        if self.parent is not None:
+            self.parent.back_propagation()
+
+def compute_state_value(initial_state, game_state):
+    """
+    Given the initial game state and the current game state, computes and returns its value relative 
+    to how much money an agent has lost/gained. If the current state is not terminal, return zero.
+    """
+    if game_state["street"] == Const.Street.FINISHED:
+        # TODO: How to compute difference in stacks before and after the round is over?
+        # Use initial_state
+        # Get Player
+        pass
+    else:
+        return 0
+
