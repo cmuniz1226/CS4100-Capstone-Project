@@ -4,7 +4,7 @@ from pypokerengine.utils.card_utils import gen_cards
 from pypokerengine.utils.game_state_utils import restore_game_state, attach_hole_card, attach_hole_card_from_deck
 
 NB_SIMULATION = 1000
-DEBUG_MODE = True
+DEBUG_MODE = False
 def log(msg):
     if DEBUG_MODE: print("[debug_info] --> %s" % msg)
 
