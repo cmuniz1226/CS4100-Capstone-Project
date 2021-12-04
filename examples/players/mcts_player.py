@@ -5,7 +5,7 @@ from .emulator_player import EmulatorPlayer, MyModel
 from pypokerengine.engine.poker_constants import PokerConstants as Const
 import math
 
-NUM_PLAYOUTS = 100000
+NUM_PLAYOUTS = 10000
 ACTIONS = [MyModel.FOLD, MyModel.CALL, MyModel.MIN_RAISE, MyModel.MAX_RAISE]
 
 UCB1_EXPLORATION_CONSTANT = math.sqrt(2)
@@ -16,7 +16,7 @@ class MCTSPlayerModel(MyModel):
     """    
     def declare_action(self, valid_actions, hole_card, round_state):
         if self.action == self.MAX_RAISE:
-            adjusted_maximum = valid_actions[2]['amount']['max'] / 2
+            adjusted_maximum = valid_actions[2]['amount']['max'] / 10
             adjusted_maximum = int(adjusted_maximum)
             return valid_actions[2]['action'], adjusted_maximum
         return super().declare_action(valid_actions, hole_card, round_state)
@@ -36,8 +36,9 @@ class MCTSPlayer(EmulatorPlayer):
             for _ in range(NUM_PLAYOUTS):
                 leaf_node = leaf_node.select_leaf()
                 leaf_node.simulate_playout()
-
+            
             actions_and_results[action] = mcts_root.propagated_state_value
+        print(actions_and_results)
         best_action = max(actions_and_results, key=actions_and_results.get)
         self.my_model.set_action(best_action)
         return self.my_model.declare_action(valid_actions, hole_card, round_state)
