@@ -1,3 +1,4 @@
+import json
 from pypokerengine.api.game import setup_config, start_poker
 from examples.players.honest_player import HonestPlayer
 from examples.players.fish_player import FishPlayer
@@ -9,8 +10,11 @@ NUM_OTHER_PLAYERS = 2
 MAX_ROUNDS = 20
 INITIAL_STACK = 200
 SMALL_BLIND = 5
+
+RESULT_FILE_NAME = './gameplay_data/mcts_vs_honest_players.json'
+
 config = setup_config(max_round=MAX_ROUNDS, initial_stack=INITIAL_STACK, small_blind_amount=SMALL_BLIND)
-our_player = MCTSPlayer()
+our_player = MCTSPlayer(10000)
 our_player.set_opponents_model(RandomPlayer())
 
 other_players = [HonestPlayer() for _ in range(NUM_OTHER_PLAYERS)]
@@ -27,3 +31,12 @@ for player in other_players:
     player_number += 1
     
 game_result = start_poker(config, verbose=1)
+result_data = {}
+for player in game_result["players"]:
+    result_data[player["name"]] =  player['stack']
+
+result_file = open(RESULT_FILE_NAME, 'a')
+result_file.write(json.dumps(result_data))
+result_file.close()
+
+print(result_data)

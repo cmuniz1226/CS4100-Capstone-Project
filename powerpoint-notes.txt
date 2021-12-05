@@ -1,0 +1,36 @@
+Powerpoint Notes:
+
+- Progress
+	- MCTS w/o adjustment for max raise
+	- MCTS adjusted max raise
+	- MCTS basic heuristic
+	- MCTS more in-depth heuristic (how many players in game; heuristic value -> actions)
+	- MCTS final heuristic (keeping track of cards and opponent bets)
+
+- Data Collection:
+
+
+	- Us vs Random/Honest/Emulator
+		- 10, 25, 50, 100 # of rounds
+		- 2, 4, 6, 8, 10 (# of Total Players)
+		- 10, 100, 1000, 10000, 100000
+
+	
+	- Length of Game
+		- How well does agent perform with increasing number of rounds?
+
+
+	- Number of Players
+		- How well does our playout evaluation do with more players in game?
+
+	
+	- Number of Playouts
+		- How many playouts give agent optimal decision-making without sacrificing performance?
+
+
+	- Skill of Opponents?
+		- Constant # of Opponents
+		- How well do we perform against skilled opponents?
+			- Random vs Honest vs Emulator
+			- If time, US (Console Player)
+

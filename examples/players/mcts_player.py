@@ -1,20 +1,50 @@
 from pypokerengine.api import game
 from pypokerengine.api.emulator import Emulator
+from pypokerengine.engine.card import Card
 from pypokerengine.players import BasePokerPlayer
 from .emulator_player import EmulatorPlayer, MyModel
 from pypokerengine.engine.poker_constants import PokerConstants as Const
+from pypokerengine.engine.hand_evaluator import HandEvaluator
 import math
 
-NUM_PLAYOUTS = 10000
 ACTIONS = [MyModel.FOLD, MyModel.CALL, MyModel.MIN_RAISE, MyModel.MAX_RAISE]
+
+BAD_HAND_NUMBER = 4000
+
+STR_TO_STREET = {
+    'preflop': Const.Street.PREFLOP,
+    'flop': Const.Street.FLOP,
+    'turn': Const.Street.TURN,
+    'river': Const.Street.RIVER,
+    'showdown': Const.Street.SHOWDOWN,
+    'finished': Const.Street.FINISHED
+}
 
 UCB1_EXPLORATION_CONSTANT = math.sqrt(2)
 
 class MCTSPlayerModel(MyModel):
+    def __init__(self):
+        super().__init__()
+        self.heuristic = None
+
+    def set_heuristic(self, heuristic):
+        self.heuristic = heuristic
+
     """
     Decides actions based on our
     """    
     def declare_action(self, valid_actions, hole_card, round_state):
+        
+        if self.heuristic is not None:
+            hole_cards = [Card.from_str(card) for card in hole_card]
+            comm_cards = [Card.from_str(card) for card in round_state["community_card"]]
+            hand_val = self.heuristic(hole_cards, comm_cards)
+            street_val = STR_TO_STREET[round_state['street']]
+            should_fold = hand_val <= BAD_HAND_NUMBER * street_val * 5
+            if should_fold:
+                self.action = self.FOLD
+            
+
         if self.action == self.MAX_RAISE:
             adjusted_maximum = valid_actions[2]['amount']['max'] / 10
             adjusted_maximum = int(adjusted_maximum)
@@ -24,16 +54,21 @@ class MCTSPlayerModel(MyModel):
 
 class MCTSPlayer(EmulatorPlayer):
 
+    def __init__(self, number_of_playouts):
+        super().__init__()
+        self.number_of_playouts = number_of_playouts
+
     def declare_action(self, valid_actions, hole_card, round_state):
         # The below code is running the MCTS algorithm.
         actions_and_results = {action: 0 for action in ACTIONS}
         for action in actions_and_results:
             self.my_model.set_action(action)
+            self.player_model.set_action(action)
             emulator_game_state = self._setup_game_state(round_state, hole_card)
-            mcts_root = MCTSNode(self.emulator, emulator_game_state, self.uuid,
+            mcts_root = MCTSNode(self.emulator, emulator_game_state, self.uuid, model=self.player_model,
                                  declare_action_args=[valid_actions, hole_card, round_state])
             leaf_node = mcts_root
-            for _ in range(NUM_PLAYOUTS):
+            for _ in range(self.number_of_playouts):
                 leaf_node = leaf_node.select_leaf()
                 leaf_node.simulate_playout()
             
@@ -54,7 +89,10 @@ class MCTSPlayer(EmulatorPlayer):
         self.emulator.set_game_rule(nb_player, max_round, sb_amount, ante_amount)
         for player_info in game_info['seats']:
             uuid = player_info['uuid']
-            player_model = self.my_model if uuid == self.uuid else self.opponents_model
+            player_model = MCTSPlayerModel() if uuid == self.uuid else self.opponents_model
+            if uuid == self.uuid:
+                player_model.set_heuristic(HandEvaluator.eval_hand)
+                self.player_model = player_model
             self.emulator.register_player(uuid, player_model)
 
     def receive_street_start_message(self, street, round_state):
@@ -94,10 +132,10 @@ class MCTSNode:
             real_action, amount = self.model.declare_action(*self.declare_action_args)
             new_state, events = self.emulator.apply_action(self.game_state, real_action, amount)
             if is_terminal_state(new_state, self.uuid):
-                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, parent=self))
+                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, model=self.model, parent=self))
             else:
                 new_args = [events[-1]["valid_actions"], None, events[-1]["round_state"]]
-                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, declare_action_args=new_args, parent=self))
+                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, model=self.model, declare_action_args=new_args, parent=self))
             
     def select_leaf(self):
         """
