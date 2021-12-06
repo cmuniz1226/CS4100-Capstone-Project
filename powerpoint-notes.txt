@@ -9,10 +9,9 @@ Powerpoint Notes:
 
 - Data Collection:
 
-
 	- Us vs Random/Honest/Emulator
-		- 10, 25, 50, 100 # of rounds
-		- 2, 4, 6, 8, 10 (# of Total Players)
+		- 5, 10, 15, 20 # of rounds
+		- 2, 4, 6, 8 (# of Total Players)
 		- 10, 100, 1000, 10000, 100000
 
 	

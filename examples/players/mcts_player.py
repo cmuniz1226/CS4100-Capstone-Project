@@ -1,3 +1,4 @@
+import random
 from pypokerengine.api import game
 from pypokerengine.api.emulator import Emulator
 from pypokerengine.engine.card import Card
@@ -6,6 +7,7 @@ from .emulator_player import EmulatorPlayer, MyModel
 from pypokerengine.engine.poker_constants import PokerConstants as Const
 from pypokerengine.engine.hand_evaluator import HandEvaluator
 import math
+import time
 
 ACTIONS = [MyModel.FOLD, MyModel.CALL, MyModel.MIN_RAISE, MyModel.MAX_RAISE]
 
@@ -23,8 +25,9 @@ STR_TO_STREET = {
 UCB1_EXPLORATION_CONSTANT = math.sqrt(2)
 
 class MCTSPlayerModel(MyModel):
-    def __init__(self):
+    def __init__(self, uuid):
         super().__init__()
+        self.uuid = uuid
         self.heuristic = None
 
     def set_heuristic(self, heuristic):
@@ -34,22 +37,72 @@ class MCTSPlayerModel(MyModel):
     Decides actions based on our
     """    
     def declare_action(self, valid_actions, hole_card, round_state):
-        
+        self.action = random.choice(ACTIONS)
+        cards_in_hole = [Card.from_str(card) for card in hole_card]
+        cards_on_table = [Card.from_str(card) for card in round_state["community_card"]]
+        # Agent chooses action based on heuristic.
         if self.heuristic is not None:
-            hole_cards = [Card.from_str(card) for card in hole_card]
-            comm_cards = [Card.from_str(card) for card in round_state["community_card"]]
-            hand_val = self.heuristic(hole_cards, comm_cards)
-            street_val = STR_TO_STREET[round_state['street']]
-            should_fold = hand_val <= BAD_HAND_NUMBER * street_val * 5
-            if should_fold:
-                self.action = self.FOLD
-            
+            h_val = self.heuristic(cards_in_hole, cards_on_table)
+            if h_val > 175000 and valid_actions[self.CALL]['amount'] \
+                >= get_player_stack(round_state, self.uuid):
+                self.action = self.CALL
+            if h_val > 150000:
+                self.action = self.MAX_RAISE
+            elif h_val <= 150000 and h_val > 80000:
+                self.action = self.MIN_RAISE
+            elif h_val <= 80000 and h_val > 25000:
+                self.action = self.CALL
+            if h_val < 25000:
+                self.action =  self.FOLD
 
+        # Make sure agent does not ever go all in.
         if self.action == self.MAX_RAISE:
             adjusted_maximum = valid_actions[2]['amount']['max'] / 10
             adjusted_maximum = int(adjusted_maximum)
             return valid_actions[2]['action'], adjusted_maximum
-        return super().declare_action(valid_actions, hole_card, round_state)
+        
+        action, amount = super().declare_action(valid_actions, hole_card, round_state)
+        return action, amount
+
+
+def heuristic_function(hole_card, community_card):
+    """
+    Generates a heuristic value based on the agent's hole card and the community cards
+    on the table. This value is used in the MCTSPlayerModel to make decisions based on how
+    well the player is likely to do against its opponents.
+    """
+    hole_cards = [Card.from_str(card) for card in hole_card]
+    comm_cards = [Card.from_str(card) for card in community_card]
+    available_cards = get_available_cards(hole_cards, comm_cards)
+    ev_opponents = expected_value_of_opponents(available_cards, comm_cards)
+    value = HandEvaluator.eval_hand(hole_cards, comm_cards) / ev_opponents
+    return value
+
+
+def get_available_cards(hole_card, community_card):
+    """
+    Given the hole cards (agent's hand) and the community cards on the table,
+    determine what cards are still available and return that list.
+    """
+    available_cards = []
+    for suit in Card.SUIT_MAP.keys():
+        for rank in Card.RANK_MAP.keys():
+            possible_card = Card(suit, rank)
+            if possible_card not in hole_card and possible_card not in community_card:
+                available_cards.append(possible_card)
+    return available_cards
+
+
+def expected_value_of_opponents(available_cards, community_card, depth=10):
+    expected_value = 0
+    hand_len = 2
+    total_combinations = combination(len(available_cards), hand_len)
+    for first_card_index in range(min(len(available_cards), depth)):
+        if first_card_index != (len(available_cards) - 1):
+            for second_card_index in range(first_card_index + 1, len(available_cards)):
+                hole_card = [available_cards[first_card_index], available_cards[second_card_index]]
+                expected_value += HandEvaluator.eval_hand(hole_card, community_card) / total_combinations
+    return expected_value
 
 
 class MCTSPlayer(EmulatorPlayer):
@@ -65,21 +118,21 @@ class MCTSPlayer(EmulatorPlayer):
             self.my_model.set_action(action)
             self.player_model.set_action(action)
             emulator_game_state = self._setup_game_state(round_state, hole_card)
-            mcts_root = MCTSNode(self.emulator, emulator_game_state, self.uuid, model=self.player_model,
+            mcts_root = MCTSNode(self.emulator, emulator_game_state, self.uuid, hole_card, model=self.player_model,
                                  declare_action_args=[valid_actions, hole_card, round_state])
             leaf_node = mcts_root
             for _ in range(self.number_of_playouts):
                 leaf_node = leaf_node.select_leaf()
                 leaf_node.simulate_playout()
             
-            actions_and_results[action] = mcts_root.propagated_state_value
+            actions_and_results[action] = mcts_root.get_node_value()
         print(actions_and_results)
         best_action = max(actions_and_results, key=actions_and_results.get)
         self.my_model.set_action(best_action)
         return self.my_model.declare_action(valid_actions, hole_card, round_state)
 
     def receive_game_start_message(self, game_info):
-        self.my_model = MCTSPlayerModel()
+        self.my_model = MCTSPlayerModel(self.uuid)
         nb_player = game_info['player_num']
         max_round = game_info['rule']['max_round']
         sb_amount = game_info['rule']['small_blind_amount']
@@ -89,9 +142,8 @@ class MCTSPlayer(EmulatorPlayer):
         self.emulator.set_game_rule(nb_player, max_round, sb_amount, ante_amount)
         for player_info in game_info['seats']:
             uuid = player_info['uuid']
-            player_model = MCTSPlayerModel() if uuid == self.uuid else self.opponents_model
+            player_model = MCTSPlayerModel(self.uuid) if uuid == self.uuid else self.opponents_model
             if uuid == self.uuid:
-                player_model.set_heuristic(HandEvaluator.eval_hand)
                 self.player_model = player_model
             self.emulator.register_player(uuid, player_model)
 
@@ -106,11 +158,15 @@ class MCTSPlayer(EmulatorPlayer):
 
 
 class MCTSNode:
-    def __init__(self, emulator, current_game_state, uuid, model=MCTSPlayerModel(), declare_action_args=None, parent=None):
+    def __init__(self, emulator, current_game_state, uuid, hole_card, model=None, declare_action_args=None, parent=None):
         self.emulator = emulator
         self.game_state = current_game_state
         self.uuid = uuid
-        self.model = model
+        self.hole_card = hole_card
+        if model is None:
+            self.model = MCTSPlayerModel(uuid)
+        else:
+            self.model = model
         self.declare_action_args = declare_action_args
         self.parent = parent
         self.initial_state = current_game_state
@@ -127,15 +183,18 @@ class MCTSNode:
 
         SIDE EFFECT: Mutates self.children. 
         """
+        if self.model.heuristic is not None:
+            self.model.set_heuristic(None)
+
         for a in ACTIONS:
             self.model.set_action(a)
             real_action, amount = self.model.declare_action(*self.declare_action_args)
             new_state, events = self.emulator.apply_action(self.game_state, real_action, amount)
             if is_terminal_state(new_state, self.uuid):
-                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, model=self.model, parent=self))
+                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, model=self.model, parent=self))
             else:
-                new_args = [events[-1]["valid_actions"], None, events[-1]["round_state"]]
-                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, model=self.model, declare_action_args=new_args, parent=self))
+                new_args = [events[-1]["valid_actions"], self.hole_card, events[-1]["round_state"]]
+                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, model=self.model, declare_action_args=new_args, parent=self))
             
     def select_leaf(self):
         """
@@ -168,10 +227,8 @@ class MCTSNode:
         assert len(self.children) == 0, "Node being expanded is not a leaf"
 
         if self.num_playouts == 0:
-            # print("No Playouts.")
             return self
         else:
-            # print("Creating children.")
             self.generate_children()
             return self.children[0]
 
@@ -182,17 +239,15 @@ class MCTSNode:
         """
         if not is_terminal_state(self.game_state, self.uuid):
             next_node = self.expand()
+            next_node.model.set_heuristic(HandEvaluator.eval_hand)
             round_end_state, _ = self.emulator.run_until_round_finish(next_node.game_state)
             next_node.num_playouts += 1
             # TODO: Can num_playouts ever be 0?
-            next_node.propagated_state_value = ((next_node.propagated_state_value * (next_node.num_playouts - 1)) +
-                                                next_node.compute_state_value(round_end_state)) / next_node.num_playouts
-            # print(next_node.propagated_state_value)
+            next_node.propagated_state_value = next_node.compute_state_value(round_end_state)
             if next_node.parent is not None:
-                next_node.back_propagation()
+                next_node.back_propagation(next_node.compute_state_value(round_end_state))
         else:
-            # print("ATTEMPTING TO SIMULATE PLAYOUT WITH NODE CONTAINING TERMINAL STATE")
-            self.back_propagation()
+            self.back_propagation(self.compute_state_value(self.game_state))
 
     def selection_policy_value(self):
         """
@@ -201,28 +256,23 @@ class MCTSNode:
         if self.num_playouts == 0:
             return 0
 
-        exploitation_value = self.propagated_state_value / self.num_playouts
+        exploitation_value = self.get_node_value()
 
         exploration_value = math.sqrt(math.log(self.parent.num_playouts) / self.num_playouts)
         exploration_value *= UCB1_EXPLORATION_CONSTANT
 
         return exploitation_value + exploration_value
 
-    def back_propagation(self):
+    def back_propagation(self, value_to_propagate):
         """
         Recursively propagates state value information back up the tree. This is called after rollout/playout simulation 
         is completed. Backpropagation ends when we hit the root node.
         """
         # don't compute these values for terminal state; terminal state has no children so the values would be set to 0
         if self.parent is not None:
-            self.parent.propagated_state_value += self.propagated_state_value
             self.parent.num_playouts += 1
-        # if not is_terminal_state(self.game_state, self.uuid):
-        #     self.propagated_state_value = sum([child.propagated_state_value for child in self.children])
-        #     self.num_playouts = sum([child.num_playouts for child in self.children])
-
-        # if self.parent is not None:
-        #     self.parent.back_propagation()
+            self.parent.propagated_state_value += value_to_propagate
+            self.parent.back_propagation(value_to_propagate)
 
     def compute_state_value(self, final_state):
         """
@@ -236,6 +286,12 @@ class MCTSNode:
         else:
             return 0
 
+    def get_node_value(self):
+        """
+        Get the value caclulated for this node from its playouts and children.
+        """
+        # print(self.num_playouts)
+        return self.propagated_state_value / self.num_playouts
 
 def is_table_player_active(table, uuid):
     """
@@ -247,6 +303,7 @@ def is_table_player_active(table, uuid):
         if player.uuid == uuid:
             return player.is_active()
 
+
 def is_terminal_state(game_state, uuid):
     """
     Given a game state and a player's uuid, returns True if the player is done 
@@ -256,10 +313,22 @@ def is_terminal_state(game_state, uuid):
     player_active = is_table_player_active(game_state["table"], uuid)
     return not player_active or game_finished
 
+
 def get_player_stack(game_state, uuid):
     """
     Given a Poker game state and a player's uuid, return the value of their stack
     (how many chips they have).
     """
-    return [player for player in game_state['table'].seats.players if player.uuid == uuid][0].stack
+    if 'table' in list(game_state.keys()):
+        return [player for player in game_state['table'].seats.players if player.uuid == uuid][0].stack
+    else:
+        return [player for player in game_state['seats'] if player['uuid'] == uuid][0]['stack']
+     
+    
 
+
+def combination(n, r):
+    """
+    Calculates the combination formula given n and r.
+    """
+    return (math.factorial(n)) / ((math.factorial(r)) * math.factorial(n - r))
