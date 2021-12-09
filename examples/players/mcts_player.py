@@ -36,24 +36,10 @@ class MCTSPlayerModel(MyModel):
     """
     Decides actions based on our
     """    
-    def declare_action(self, valid_actions, hole_card, round_state):
-        self.action = random.choice(ACTIONS)
-        cards_in_hole = [Card.from_str(card) for card in hole_card]
-        cards_on_table = [Card.from_str(card) for card in round_state["community_card"]]
+    def declare_action(self, valid_actions, hole_card, round_state):      
         # Agent chooses action based on heuristic.
         if self.heuristic is not None:
-            h_val = self.heuristic(cards_in_hole, cards_on_table)
-            if h_val > 175000 and valid_actions[self.CALL]['amount'] \
-                >= get_player_stack(round_state, self.uuid):
-                self.action = self.CALL
-            if h_val > 150000:
-                self.action = self.MAX_RAISE
-            elif h_val <= 150000 and h_val > 80000:
-                self.action = self.MIN_RAISE
-            elif h_val <= 80000 and h_val > 25000:
-                self.action = self.CALL
-            if h_val < 25000:
-                self.action =  self.FOLD
+            self.action = self.heuristic(hole_card, round_state)
 
         # Make sure agent does not ever go all in.
         if self.action == self.MAX_RAISE:
@@ -65,44 +51,101 @@ class MCTSPlayerModel(MyModel):
         return action, amount
 
 
-def heuristic_function(hole_card, community_card):
+def nyu_heuristic_function(hole_card, round_state):
     """
-    Generates a heuristic value based on the agent's hole card and the community cards
-    on the table. This value is used in the MCTSPlayerModel to make decisions based on how
-    well the player is likely to do against its opponents.
+    Given the hole card (cards in agent's hand) and the state of a round (including pot and 
+    commyunity cards), return an action based on the specified heuristic 
+    (http://game.engineering.nyu.edu/wp-content/uploads/2018/05/generating-beginner-heuristics-for-simple-texas-holdem.pdf).
     """
-    hole_cards = [Card.from_str(card) for card in hole_card]
-    comm_cards = [Card.from_str(card) for card in community_card]
-    available_cards = get_available_cards(hole_cards, comm_cards)
-    ev_opponents = expected_value_of_opponents(available_cards, comm_cards)
-    value = HandEvaluator.eval_hand(hole_cards, comm_cards) / ev_opponents
-    return value
+    cards_in_hole = [Card.from_str(card) for card in hole_card]
+    cards_on_table = [Card.from_str(card) for card in round_state["community_card"]]
+    available_cards = cards_in_hole.extend(cards_on_table)
+    
+    # Hand Strength Info
+    lowest_card_rank = min([card.rank for card in cards_in_hole])
+    highest_card_rank = max([card.rank for card in cards_in_hole])
+    has_pair = highest_card_rank == lowest_card_rank
+
+    big_blind_amount = 2 * round_state['small_blind_amount']
+    pot = round_state['pot']['main']['amount']
+
+    # Betting info    
+    big_blinds_in_pot = pot / big_blind_amount
+
+    if lowest_card_rank <= 7 and highest_card_rank <= 11:
+        return MCTSPlayerModel.CALL
+    elif big_blinds_in_pot <= 2:
+        return MCTSPlayerModel.MIN_RAISE
+    elif has_pair:
+        return MCTSPlayerModel.MIN_RAISE
+    # elif big_blinds_in_pot >= 6:
+    #     return MCTSPlayerModel.FOLD
+    else:
+        return MCTSPlayerModel.CALL
 
 
-def get_available_cards(hole_card, community_card):
+def custom_heuristic(hole_card, round_state):
     """
-    Given the hole cards (agent's hand) and the community cards on the table,
-    determine what cards are still available and return that list.
+    Given the hole card (cards in agent's hand) and the round state, return a desireable 
+    action based on the information provided. This heuristic is based on our idea of what
+    we think is a desireable actino to take.
     """
-    available_cards = []
-    for suit in Card.SUIT_MAP.keys():
-        for rank in Card.RANK_MAP.keys():
-            possible_card = Card(suit, rank)
-            if possible_card not in hole_card and possible_card not in community_card:
-                available_cards.append(possible_card)
-    return available_cards
+    cards_in_hole = [Card.from_str(card) for card in hole_card]
+    cards_on_table = [Card.from_str(card) for card in round_state["community_card"]]
+    h_val = HandEvaluator.eval_hand(cards_in_hole, cards_on_table)
+
+    # TODO: Better way to get last bet. 
+    # if h_val > 175000: #and valid_actions[MCTSPlayerModel.CALL]['amount'] \
+    #     #>= get_player_stack(round_state, self.uuid):
+    #     return MCTSPlayerModel.CALL
+    if h_val > 150000:
+        return MCTSPlayerModel.MAX_RAISE
+    elif h_val <= 150000 and h_val > 80000:
+        return MCTSPlayerModel.MIN_RAISE
+    elif h_val <= 80000 and h_val > 25000:
+        return MCTSPlayerModel.CALL
+    else:
+        return MCTSPlayerModel.FOLD
 
 
-def expected_value_of_opponents(available_cards, community_card, depth=10):
-    expected_value = 0
-    hand_len = 2
-    total_combinations = combination(len(available_cards), hand_len)
-    for first_card_index in range(min(len(available_cards), depth)):
-        if first_card_index != (len(available_cards) - 1):
-            for second_card_index in range(first_card_index + 1, len(available_cards)):
-                hole_card = [available_cards[first_card_index], available_cards[second_card_index]]
-                expected_value += HandEvaluator.eval_hand(hole_card, community_card) / total_combinations
-    return expected_value
+# def heuristic_function(hole_card, community_card):
+#     """
+#     Generates a heuristic value based on the agent's hole card and the community cards
+#     on the table. This value is used in the MCTSPlayerModel to make decisions based on how
+#     well the player is likely to do against its opponents.
+#     """
+#     hole_cards = [Card.from_str(card) for card in hole_card]
+#     comm_cards = [Card.from_str(card) for card in community_card]
+#     available_cards = get_available_cards(hole_cards, comm_cards)
+#     ev_opponents = expected_value_of_opponents(available_cards, comm_cards)
+#     value = HandEvaluator.eval_hand(hole_cards, comm_cards) / ev_opponents
+#     return value
+
+
+# def get_available_cards(hole_card, community_card):
+#     """
+#     Given the hole cards (agent's hand) and the community cards on the table,
+#     determine what cards are still available and return that list.
+#     """
+#     available_cards = []
+#     for suit in Card.SUIT_MAP.keys():
+#         for rank in Card.RANK_MAP.keys():
+#             possible_card = Card(suit, rank)
+#             if possible_card not in hole_card and possible_card not in community_card:
+#                 available_cards.append(possible_card)
+#     return available_cards
+
+
+# def expected_value_of_opponents(available_cards, community_card, depth=10):
+#     expected_value = 0
+#     hand_len = 2
+#     total_combinations = combination(len(available_cards), hand_len)
+#     for first_card_index in range(min(len(available_cards), depth)):
+#         if first_card_index != (len(available_cards) - 1):
+#             for second_card_index in range(first_card_index + 1, len(available_cards)):
+#                 hole_card = [available_cards[first_card_index], available_cards[second_card_index]]
+#                 expected_value += HandEvaluator.eval_hand(hole_card, community_card) / total_combinations
+#     return expected_value
 
 
 class MCTSPlayer(EmulatorPlayer):
@@ -185,7 +228,6 @@ class MCTSNode:
         """
         if self.model.heuristic is not None:
             self.model.set_heuristic(None)
-
         for a in ACTIONS:
             self.model.set_action(a)
             real_action, amount = self.model.declare_action(*self.declare_action_args)
@@ -239,10 +281,9 @@ class MCTSNode:
         """
         if not is_terminal_state(self.game_state, self.uuid):
             next_node = self.expand()
-            next_node.model.set_heuristic(HandEvaluator.eval_hand)
+            next_node.model.set_heuristic(custom_heuristic)
             round_end_state, _ = self.emulator.run_until_round_finish(next_node.game_state)
             next_node.num_playouts += 1
-            # TODO: Can num_playouts ever be 0?
             next_node.propagated_state_value = next_node.compute_state_value(round_end_state)
             if next_node.parent is not None:
                 next_node.back_propagation(next_node.compute_state_value(round_end_state))
@@ -254,7 +295,7 @@ class MCTSNode:
         Computes and returns the UCB1 selection policy for this node.
         """
         if self.num_playouts == 0:
-            return 0
+            return math.inf
 
         exploitation_value = self.get_node_value()
 
@@ -290,7 +331,6 @@ class MCTSNode:
         """
         Get the value caclulated for this node from its playouts and children.
         """
-        # print(self.num_playouts)
         return self.propagated_state_value / self.num_playouts
 
 def is_table_player_active(table, uuid):
@@ -311,6 +351,7 @@ def is_terminal_state(game_state, uuid):
     """
     game_finished = game_state["street"] == Const.Street.FINISHED
     player_active = is_table_player_active(game_state["table"], uuid)
+    
     return not player_active or game_finished
 
 
