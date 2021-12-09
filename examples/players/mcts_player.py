@@ -31,10 +31,7 @@ class MCTSPlayerModel(MyModel):
 
     def set_heuristic(self, heuristic):
         self.heuristic = heuristic
-
-    """
-    Decides actions based on our
-    """    
+  
     def declare_action(self, valid_actions, hole_card, round_state):      
         # Agent chooses action based on heuristic.
         if self.heuristic is not None:
@@ -106,6 +103,9 @@ def custom_heuristic(hole_card, round_state):
     else:
         return MCTSPlayerModel.FOLD
 
+
+def random_action(hole_card, round_state):
+    return random.choice(ACTIONS)
 
 class MCTSPlayer(EmulatorPlayer):
 
@@ -239,10 +239,7 @@ class MCTSNode:
             round_end_state, _ = self.emulator.run_until_round_finish(next_node.game_state)
             next_node.num_playouts += 1
             next_node.propagated_state_value = next_node.compute_state_value(round_end_state)
-            if next_node.parent is not None:
-                next_node.back_propagation(next_node.compute_state_value(round_end_state))
-        else:
-            self.back_propagation(self.compute_state_value(self.game_state))
+            next_node.back_propagation()
 
     def selection_policy_value(self):
         """
@@ -258,23 +255,31 @@ class MCTSNode:
 
         return exploitation_value + exploration_value
 
-    def back_propagation(self, value_to_propagate):
+    def back_propagation(self):
         """
         Recursively propagates state value information back up the tree. This is called after rollout/playout simulation 
         is completed. Backpropagation ends when we hit the root node.
         """
         # don't compute these values for terminal state; terminal state has no children so the values would be set to 0
+        if self.is_decision_node():
+            child_values = [child.propagated_state_value for child in self.children]
+            self.propagated_state_value = max(child_values) if len(child_values) > 0 else self.propagated_state_value
+        else:
+            expected_val = 0
+            for child in self.children:
+                expected_val += (child.propagated_state_value * child.num_playouts) / self.num_playouts
+            self.propagated_state_value = expected_val
+            
         if self.parent is not None:
             self.parent.num_playouts += 1
-            self.parent.propagated_state_value += value_to_propagate
-            self.parent.back_propagation(value_to_propagate)
+            self.parent.back_propagation()
 
     def compute_state_value(self, final_state):
         """
         Given the initial game state, player id, and the final game state, computes and returns its value relative
         to how much money an agent has lost/gained. If the current state is not terminal, return zero.
         """
-        if is_terminal_state(final_state, self.uuid):
+        if final_state["street"] == Const.Street.FINISHED:
             final_stack = get_player_stack(final_state, self.uuid)
             profit = final_stack - self.initial_stack
             return profit
@@ -285,9 +290,18 @@ class MCTSNode:
         """
         Get the value caclulated for this node from its playouts and children.
         """
-        return self.propagated_state_value / self.num_playouts
+        return self.propagated_state_value
 
-
+    def is_decision_node(self):
+        """
+        Determines if this MCTSNode is a DecisionNode, aka determines if this node
+        contains a game state/round state in which it is our agent's turn.
+        """
+        active_player_index = self.game_state['next_player']
+        if (type(active_player_index) == str):
+            print(active_player_index)
+        return self.game_state['table'].seats.players[active_player_index].uuid == self.uuid
+        
 def is_table_player_active(table, uuid):
     """
     Given the table during a poker game and the uuid of a player,
@@ -304,10 +318,9 @@ def is_terminal_state(game_state, uuid):
     Given a game state and a player's uuid, returns True if the player is done 
     for that round. Else, returns False.
     """
-    game_finished = game_state["street"] == Const.Street.FINISHED
-    player_active = is_table_player_active(game_state["table"], uuid)
-    
-    return not player_active or game_finished
+    game_finished = game_state["street"] == Const.Street.FINISHED    
+    return game_finished
+
 
 def get_player_stack(game_state, uuid):
     """
