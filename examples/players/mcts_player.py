@@ -7,7 +7,6 @@ from .emulator_player import EmulatorPlayer, MyModel
 from pypokerengine.engine.poker_constants import PokerConstants as Const
 from pypokerengine.engine.hand_evaluator import HandEvaluator
 import math
-import time
 
 ACTIONS = [MyModel.FOLD, MyModel.CALL, MyModel.MIN_RAISE, MyModel.MAX_RAISE]
 
@@ -108,46 +107,6 @@ def custom_heuristic(hole_card, round_state):
         return MCTSPlayerModel.FOLD
 
 
-# def heuristic_function(hole_card, community_card):
-#     """
-#     Generates a heuristic value based on the agent's hole card and the community cards
-#     on the table. This value is used in the MCTSPlayerModel to make decisions based on how
-#     well the player is likely to do against its opponents.
-#     """
-#     hole_cards = [Card.from_str(card) for card in hole_card]
-#     comm_cards = [Card.from_str(card) for card in community_card]
-#     available_cards = get_available_cards(hole_cards, comm_cards)
-#     ev_opponents = expected_value_of_opponents(available_cards, comm_cards)
-#     value = HandEvaluator.eval_hand(hole_cards, comm_cards) / ev_opponents
-#     return value
-
-
-# def get_available_cards(hole_card, community_card):
-#     """
-#     Given the hole cards (agent's hand) and the community cards on the table,
-#     determine what cards are still available and return that list.
-#     """
-#     available_cards = []
-#     for suit in Card.SUIT_MAP.keys():
-#         for rank in Card.RANK_MAP.keys():
-#             possible_card = Card(suit, rank)
-#             if possible_card not in hole_card and possible_card not in community_card:
-#                 available_cards.append(possible_card)
-#     return available_cards
-
-
-# def expected_value_of_opponents(available_cards, community_card, depth=10):
-#     expected_value = 0
-#     hand_len = 2
-#     total_combinations = combination(len(available_cards), hand_len)
-#     for first_card_index in range(min(len(available_cards), depth)):
-#         if first_card_index != (len(available_cards) - 1):
-#             for second_card_index in range(first_card_index + 1, len(available_cards)):
-#                 hole_card = [available_cards[first_card_index], available_cards[second_card_index]]
-#                 expected_value += HandEvaluator.eval_hand(hole_card, community_card) / total_combinations
-#     return expected_value
-
-
 class MCTSPlayer(EmulatorPlayer):
 
     def __init__(self, number_of_playouts):
@@ -161,7 +120,7 @@ class MCTSPlayer(EmulatorPlayer):
             self.my_model.set_action(action)
             self.player_model.set_action(action)
             emulator_game_state = self._setup_game_state(round_state, hole_card)
-            mcts_root = MCTSNode(self.emulator, emulator_game_state, self.uuid, hole_card, model=self.player_model,
+            mcts_root = MCTSNode(self.emulator, emulator_game_state, self.uuid, hole_card, self.out_stack, model=self.player_model,
                                  declare_action_args=[valid_actions, hole_card, round_state])
             leaf_node = mcts_root
             for _ in range(self.number_of_playouts):
@@ -190,18 +149,15 @@ class MCTSPlayer(EmulatorPlayer):
                 self.player_model = player_model
             self.emulator.register_player(uuid, player_model)
 
-    def receive_street_start_message(self, street, round_state):
-        pass
-
-    def receive_game_update_message(self, new_action, round_state):
-        pass
-
-    def receive_round_result_message(self, winners, hand_info, round_state):
-        pass
+    def receive_round_start_message(self, round_count, hole_card, seats):
+        # Save initial stack for use by the MCTS algorithm to determine profit upon terminal state(s)
+        # for our agent.
+        self.out_stack = [player for player in seats if player['uuid'] == self.uuid][0]['stack']
 
 
 class MCTSNode:
-    def __init__(self, emulator, current_game_state, uuid, hole_card, model=None, declare_action_args=None, parent=None):
+
+    def __init__(self, emulator, current_game_state, uuid, hole_card, initial_stack, model=None, declare_action_args=None, parent=None):
         self.emulator = emulator
         self.game_state = current_game_state
         self.uuid = uuid
@@ -212,9 +168,7 @@ class MCTSNode:
             self.model = model
         self.declare_action_args = declare_action_args
         self.parent = parent
-        self.initial_state = current_game_state
-        if self.parent is not None:
-            self.initial_state = self.parent.initial_state
+        self.initial_stack = initial_stack
         self.children = []
         self.num_playouts = 0
         self.propagated_state_value = 0
@@ -233,10 +187,10 @@ class MCTSNode:
             real_action, amount = self.model.declare_action(*self.declare_action_args)
             new_state, events = self.emulator.apply_action(self.game_state, real_action, amount)
             if is_terminal_state(new_state, self.uuid):
-                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, model=self.model, parent=self))
+                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, self.initial_stack, model=self.model, parent=self))
             else:
                 new_args = [events[-1]["valid_actions"], self.hole_card, events[-1]["round_state"]]
-                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, model=self.model, declare_action_args=new_args, parent=self))
+                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, self.initial_stack, model=self.model, declare_action_args=new_args, parent=self))
             
     def select_leaf(self):
         """
@@ -281,7 +235,7 @@ class MCTSNode:
         """
         if not is_terminal_state(self.game_state, self.uuid):
             next_node = self.expand()
-            next_node.model.set_heuristic(custom_heuristic)
+            next_node.model.set_heuristic(nyu_heuristic_function)
             round_end_state, _ = self.emulator.run_until_round_finish(next_node.game_state)
             next_node.num_playouts += 1
             next_node.propagated_state_value = next_node.compute_state_value(round_end_state)
@@ -321,9 +275,9 @@ class MCTSNode:
         to how much money an agent has lost/gained. If the current state is not terminal, return zero.
         """
         if is_terminal_state(final_state, self.uuid):
-            initial_stack = get_player_stack(self.initial_state, self.uuid)
             final_stack = get_player_stack(final_state, self.uuid)
-            return final_stack - initial_stack
+            profit = final_stack - self.initial_stack
+            return profit
         else:
             return 0
 
@@ -332,6 +286,7 @@ class MCTSNode:
         Get the value caclulated for this node from its playouts and children.
         """
         return self.propagated_state_value / self.num_playouts
+
 
 def is_table_player_active(table, uuid):
     """
@@ -354,7 +309,6 @@ def is_terminal_state(game_state, uuid):
     
     return not player_active or game_finished
 
-
 def get_player_stack(game_state, uuid):
     """
     Given a Poker game state and a player's uuid, return the value of their stack
@@ -365,9 +319,11 @@ def get_player_stack(game_state, uuid):
     else:
         return [player for player in game_state['seats'] if player['uuid'] == uuid][0]['stack']
      
-    
 
 
+
+# Math utility functions.
+     
 def combination(n, r):
     """
     Calculates the combination formula given n and r.
