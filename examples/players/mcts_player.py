@@ -10,10 +10,6 @@ import math
 
 ACTIONS = [MyModel.FOLD, MyModel.CALL, MyModel.MIN_RAISE, MyModel.MAX_RAISE]
 
-ACTION_TO_STRING = {
-    MyModel.FOLD: 'fold', MyModel.CALL: 'call', MyModel.MIN_RAISE: 'raise', MyModel.MAX_RAISE: 'raise'
-}
-
 BAD_HAND_NUMBER = 4000
 
 STR_TO_STREET = {
@@ -44,7 +40,7 @@ class MCTSPlayerModel(MyModel):
 
         # Make sure agent does not ever go all in.
         if self.action == self.MAX_RAISE:
-            adjusted_maximum = valid_actions[2]['amount']['max'] / 10
+            adjusted_maximum = valid_actions[2]['amount']['max'] / 2
             adjusted_maximum = int(adjusted_maximum)
             return valid_actions[2]['action'], adjusted_maximum
         

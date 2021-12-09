@@ -5,6 +5,7 @@ from examples.players.honest_player import HonestPlayer
 from examples.players.random_player import RandomPlayer
 from examples.players.mcts_player import MCTSPlayer
 from examples.players.emulator_player import EmulatorPlayer
+from examples.players.mcts_player import nyu_heuristic_function
 
 #NUM_OTHER_PLAYERS = 2
 # MAX_ROUNDS = 20
@@ -24,7 +25,7 @@ def play_game_with_settings(max_rounds, num_other_players, opponent_player, resu
     file path.
     """
     config = setup_config(max_round=max_rounds, initial_stack=INITIAL_STACK, small_blind_amount=SMALL_BLIND)
-    our_player = MCTSPlayer(num_playouts)
+    our_player = MCTSPlayer(num_playouts, nyu_heuristic_function)
     our_player.set_opponents_model(RandomPlayer())
 
     other_players = [opponent_player() for _ in range(num_other_players)]

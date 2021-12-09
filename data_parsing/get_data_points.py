@@ -1,6 +1,10 @@
 import json, re
-from os import listdir, mkdir
+from os import listdir, mkdir, write
 from os.path import isfile, join, exists
+from examples.players.mcts_player import get_player_stack
+from main import HEURISTICS, OPPONENT_ALGORITHMS, NUM_ROUNDS, \
+    NUM_OTHER_PLAYERS, NUM_PLAYOUTS
+import csv
 
 INITIAL_STACK = 200
 BOT_NAME = 'Stonks'
@@ -14,6 +18,9 @@ CSV_FILE_PATH = GAMEPLAY_DATA_FILE_PATH + '/CSVs/'
 
 def get_average_profit(file_name, bot_name, initial_stack):
     """
+    Given the name for a game results JSON file, the name of our bot, and 
+    the initial stack the bot started out with in each game, return the average
+    profit of that bot.
     """
     gameplay_data_file = open(file_name, 'r')
     game_results = gameplay_data_file.read()
@@ -34,61 +41,62 @@ def get_average_profit(file_name, bot_name, initial_stack):
     return (final_stacks / num_results) - initial_stack
 
 
-def write_to_CSV(initial_stack, bot_name, csv_file_name, player_type='[a-zA-Z]+', round_count='[0-9]+', other_player_count='[0-9]+', playouts_count='[0-9]+'):
-    
+# Result File Name Format: <heuristic_function>_<other-player-algo>_<num-rounds>_<num-other-players>_<num-playouts>
+def write_avg_profit_data_to_CSV(bot_name, initial_stack, csv_file_name, heursitic_function='[a-zA-Z]+', opponent_algo='[a-zA-Z]+', num_rounds='[0-9]+',
+    num_other_players='[0-9]+', num_playouts='[0-9]+'):
+    """
+    Given the name of a bot, the bot's initial stack, and the CSV file name to write to, 
+    gather average profit data based on specified regex patterns for metrics that apply
+    to previously generated JSON game results.
+    """
     if not exists(CSV_FILE_PATH):
         mkdir(CSV_FILE_PATH)
 
-    file_name_pattern = r'{0}_{1}-rounds_{2}-others_{3}-playouts.json'.format(player_type, round_count, 
-        other_player_count, playouts_count)
-    inlcude_new_line =  False
-
+    # Get all files matching criteria
+    # Get average profit
+    # Write All profit computations to CSV
+    csv_file = open(CSV_FILE_PATH + csv_file_name, 'w', newline='')
+    writer = csv.writer(csv_file)
+    
+    file_name_pattern = r'{0}_{1}_{2}-rounds_{3}-others_{4}-playouts.json'.format(heursitic_function, opponent_algo, 
+        num_rounds, num_other_players, num_playouts)
+    
     for file_name in listdir(GAMEPLAY_DATA_FILE_PATH):
         should_get_data = bool(re.match(file_name_pattern, file_name))
         if should_get_data:
             file_path = join(GAMEPLAY_DATA_FILE_PATH, file_name)
             avg_profit = get_average_profit(file_path, bot_name, initial_stack)
-            csv_file = open(CSV_FILE_PATH + csv_file_name, 'a')
-            if inlcude_new_line:
-                csv_file.write('\n')
-            else:
-                inlcude_new_line = True
-            csv_file.write('{0},'.format(avg_profit))
-            csv_file.close()
-
+            writer.writerow([avg_profit])
+    
+    csv_file.close()
 
 def number_of_rounds():
-    metrics = [5, 10, 15, 20]
-    for metric in metrics:
-        write_to_CSV(INITIAL_STACK, BOT_NAME, 'random_average_profit_{0}_rounds.csv'.format(metric), player_type='RandomPlayer', 
-            round_count=metric, other_player_count=3, playouts_count=10000)
-        write_to_CSV(INITIAL_STACK, BOT_NAME, 'honest_average_profit_{0}_rounds.csv'.format(metric), player_type='HonestPlayer', 
-            round_count=metric, other_player_count=3, playouts_count=10000)
-
-
-def number_of_playouts():
-    metrics = [100, 1000, 10000, 100000]
-    for metric in metrics:
-        write_to_CSV(INITIAL_STACK, BOT_NAME, 'random_average_profit_{0}_playouts.csv'.format(metric), player_type='RandomPlayer', 
-            round_count=10, other_player_count=3, playouts_count=metric)
-        write_to_CSV(INITIAL_STACK, BOT_NAME, 'honest_average_profit_{0}_playouts.csv'.format(metric), player_type='HonestPlayer', 
-            round_count=10, other_player_count=3, playouts_count=metric)
+    for heuristic in HEURISTICS:
+        for opp_algorithm in OPPONENT_ALGORITHMS:
+            for rounds in NUM_ROUNDS:
+                write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_{2}_rounds.csv'.format(heuristic.__name__, opp_algorithm.__name__, rounds), 
+                    heuristic_function=heuristic.__name__, player_type=opp_algorithm.__name__, round_count=rounds, other_player_count=3, playouts_count=10000)
 
 def number_of_other_players():
-    metrics = [1, 3, 5, 7]
-    for metric in metrics:
-        write_to_CSV(INITIAL_STACK, BOT_NAME, 'random_average_profit_{0}_other_players.csv'.format(metric), player_type='RandomPlayer', 
-            round_count=10, other_player_count=metric, playouts_count=10000)
-        write_to_CSV(INITIAL_STACK, BOT_NAME, 'honest_average_profit_{0}_other_players.csv'.format(metric), player_type='HonestPlayer', 
-            round_count=10, other_player_count=metric, playouts_count=10000)
+    for heuristic in HEURISTICS:
+        for opp_algorithm in OPPONENT_ALGORITHMS:
+            for others in NUM_OTHER_PLAYERS:
+                write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_{2}_others.csv'.format(heuristic.__name__, opp_algorithm.__name__, others), 
+                    heuristic_function=heuristic.__name__, player_type=opp_algorithm.__name__, round_count=10, other_player_count=others, playouts_count=10000)
 
-def main():
+def number_of_playouts():
+    for heuristic in HEURISTICS:
+        for opp_algorithm in OPPONENT_ALGORITHMS:
+            for playouts in NUM_PLAYOUTS:
+                write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_{2}_playouts.csv'.format(heuristic.__name__, opp_algorithm.__name__, playouts), 
+                    heuristic_function=heuristic.__name__, player_type=opp_algorithm.__name__, round_count=10, other_player_count=3, playouts_count=playouts)
+            
+
+if __name__ == "__main__":
     number_of_rounds()
     number_of_playouts()
     number_of_other_players()
-    write_to_CSV(INITIAL_STACK, BOT_NAME, 'random_average_profit_all_metrics.csv', player_type='RandomPlayer')
-    write_to_CSV(INITIAL_STACK, BOT_NAME, 'honest_average_profit_all_metrics.csv', player_type='HonestPlayer')
-
-
-if __name__ == "__main__":
-    main()
+    for heuristic in HEURISTICS:
+        for opp_algo in OPPONENT_ALGORITHMS:
+            write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_all_metrics.csv'.format(heuristic, opp_algo), 
+            heursitic_function=heuristic.__name__, opponent_algo=opp_algo.__name__)

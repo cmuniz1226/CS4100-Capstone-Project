@@ -16,7 +16,7 @@ RESULTS_DIR = './gameplay_data/'
 NUM_GAMES = 30
 
 
-def play_game_with_settings(max_rounds, num_other_players, opponent_player, result_file, num_playouts, heuristic_function):
+def play_game_with_settings(max_rounds, num_other_players, opponent_player, result_file_name, num_playouts, heuristic_function):
     """
     Given the settings for the maximum number of rounds in a game, the number of other players, the
     type of other players, the file name to save results to, and the number of MCTS playouts to run,
@@ -45,17 +45,17 @@ def play_game_with_settings(max_rounds, num_other_players, opponent_player, resu
     for player in game_result["players"]:
         result_data[player["name"]] =  player['stack']
 
-    result_file = open(result_file, 'a')
-    result_file.write(json.dumps(result_data))
-    result_file.close()
+    result_file_name = open(result_file_name, 'a')
+    result_file_name.write(json.dumps(result_data))
+    result_file_name.close()
 
     print(result_data)
 
-heuristics = [nyu_heuristic_function, custom_heuristic, random_action]
-opponent_algorithms = [RandomPlayer, HonestPlayer, EmulatorPlayer]
-num_rounds = [5, 10, 15, 20]
-num_other_players = [1, 3, 5, 7]
-num_playouts = [100, 1000, 10000, 100000]
+HEURISTICS = [nyu_heuristic_function, custom_heuristic, random_action]
+OPPONENT_ALGORITHMS = [RandomPlayer, HonestPlayer, EmulatorPlayer]
+NUM_ROUNDS = [5, 10, 15, 20]
+NUM_OTHER_PLAYERS = [1, 3, 5, 7]
+NUM_PLAYOUTS = [100, 1000, 10000, 100000]
 
 def gather_data(heuristic_function):
     """
@@ -64,7 +64,7 @@ def gather_data(heuristic_function):
     """
     # Result File Name Format: <heuristic_function>_<other-player-algo>_<num-rounds>_<num-other-players>_<num-playouts>
     threads = []
-    for opp_algo in opponent_algorithms:
+    for opp_algo in OPPONENT_ALGORITHMS:
         threads.append(Thread(target=run_game_with_heuristic_and_opponent_models, args=(opp_algo, heuristic_function)))
     [thread.start() for thread in threads]
     [thread.join() for thread in threads]
@@ -77,17 +77,17 @@ def run_game_with_heuristic_and_opponent_models(opponent_algorithm, heuristic_fu
     if opponent_algorithm.__name__ == 'EmulatorPlayer':
         num_rounds_to_run = [5, 10]
     else:
-        num_rounds_to_run = num_rounds
+        num_rounds_to_run = NUM_ROUNDS
     for rounds in num_rounds_to_run:
-        for other_players in num_other_players:
-            for playouts in num_playouts:
+        for other_players in NUM_OTHER_PLAYERS:
+            for playouts in NUM_PLAYOUTS:
                 result_file_path = RESULTS_DIR + "{0}_{1}_{2}-rounds_{3}-others_{4}-playouts.json".format(heuristic_function.__name__, opponent_algorithm.__name__, rounds, other_players, playouts)
                 for _ in range(NUM_GAMES):
                     play_game_with_settings(rounds, other_players, opponent_algorithm, result_file_path, playouts, heuristic_function)
 
 if __name__ == '__main__':
     processes = []
-    for heuristic in heuristics:
+    for heuristic in HEURISTICS:
         processes.append(Process(target=gather_data, args=[heuristic]))
     [process.start() for process in processes]
     [process.join() for process in processes]
