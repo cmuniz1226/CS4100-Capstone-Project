@@ -1,10 +1,15 @@
 import json, re
-from os import listdir, mkdir, write
-from os.path import isfile, join, exists
-from examples.players.mcts_player import get_player_stack
-from main import HEURISTICS, OPPONENT_ALGORITHMS, NUM_ROUNDS, \
-    NUM_OTHER_PLAYERS, NUM_PLAYOUTS
+from os import listdir, mkdir
+from os.path import join, exists
+import os
+import inspect
 import csv
+import sys
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0, parentdir) 
+from result_params import HEURISTICS, OPPONENT_ALGORITHMS, NUM_ROUNDS, \
+    NUM_OTHER_PLAYERS, NUM_PLAYOUTS
 
 INITIAL_STACK = 200
 BOT_NAME = 'Stonks'
@@ -12,7 +17,7 @@ BOT_NAME = 'Stonks'
 DECODER_DATA_IND = 0
 DECODER_SEEK_IND = 1
 
-GAMEPLAY_DATA_FILE_PATH = '../gameplay_data'
+GAMEPLAY_DATA_FILE_PATH = './gameplay_data'
 CSV_FILE_PATH = GAMEPLAY_DATA_FILE_PATH + '/CSVs/'
 
 
@@ -42,8 +47,8 @@ def get_average_profit(file_name, bot_name, initial_stack):
 
 
 # Result File Name Format: <heuristic_function>_<other-player-algo>_<num-rounds>_<num-other-players>_<num-playouts>
-def write_avg_profit_data_to_CSV(bot_name, initial_stack, csv_file_name, heursitic_function='[a-zA-Z]+', opponent_algo='[a-zA-Z]+', num_rounds='[0-9]+',
-    num_other_players='[0-9]+', num_playouts='[0-9]+'):
+def write_avg_profit_data_to_CSV(bot_name, initial_stack, csv_file_name, heuristic_function='[a-zA-Z]+', opponent_algo='[a-zA-Z]+', round_count='[0-9]+',
+    other_player_count='[0-9]+', playouts_count='[0-9]+'):
     """
     Given the name of a bot, the bot's initial stack, and the CSV file name to write to, 
     gather average profit data based on specified regex patterns for metrics that apply
@@ -58,8 +63,8 @@ def write_avg_profit_data_to_CSV(bot_name, initial_stack, csv_file_name, heursit
     csv_file = open(CSV_FILE_PATH + csv_file_name, 'w', newline='')
     writer = csv.writer(csv_file)
     
-    file_name_pattern = r'{0}_{1}_{2}-rounds_{3}-others_{4}-playouts.json'.format(heursitic_function, opponent_algo, 
-        num_rounds, num_other_players, num_playouts)
+    file_name_pattern = r'{0}_{1}_{2}-rounds_{3}-others_{4}-playouts.json'.format(heuristic_function, opponent_algo, 
+        round_count, other_player_count, playouts_count)
     
     for file_name in listdir(GAMEPLAY_DATA_FILE_PATH):
         should_get_data = bool(re.match(file_name_pattern, file_name))
@@ -75,21 +80,21 @@ def number_of_rounds():
         for opp_algorithm in OPPONENT_ALGORITHMS:
             for rounds in NUM_ROUNDS:
                 write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_{2}_rounds.csv'.format(heuristic.__name__, opp_algorithm.__name__, rounds), 
-                    heuristic_function=heuristic.__name__, player_type=opp_algorithm.__name__, round_count=rounds, other_player_count=3, playouts_count=10000)
+                    heuristic_function=heuristic.__name__, opponent_algo=opp_algorithm.__name__, round_count=rounds, other_player_count=3, playouts_count=10000)
 
 def number_of_other_players():
     for heuristic in HEURISTICS:
         for opp_algorithm in OPPONENT_ALGORITHMS:
             for others in NUM_OTHER_PLAYERS:
                 write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_{2}_others.csv'.format(heuristic.__name__, opp_algorithm.__name__, others), 
-                    heuristic_function=heuristic.__name__, player_type=opp_algorithm.__name__, round_count=10, other_player_count=others, playouts_count=10000)
+                    heuristic_function=heuristic.__name__, opponent_algo=opp_algorithm.__name__, round_count=10, other_player_count=others, playouts_count=10000)
 
 def number_of_playouts():
     for heuristic in HEURISTICS:
         for opp_algorithm in OPPONENT_ALGORITHMS:
             for playouts in NUM_PLAYOUTS:
                 write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_{2}_playouts.csv'.format(heuristic.__name__, opp_algorithm.__name__, playouts), 
-                    heuristic_function=heuristic.__name__, player_type=opp_algorithm.__name__, round_count=10, other_player_count=3, playouts_count=playouts)
+                    heuristic_function=heuristic.__name__, opponent_algo=opp_algorithm.__name__, round_count=10, other_player_count=3, playouts_count=playouts)
             
 
 if __name__ == "__main__":
@@ -98,5 +103,5 @@ if __name__ == "__main__":
     number_of_other_players()
     for heuristic in HEURISTICS:
         for opp_algo in OPPONENT_ALGORITHMS:
-            write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_all_metrics.csv'.format(heuristic, opp_algo), 
-            heursitic_function=heuristic.__name__, opponent_algo=opp_algo.__name__)
+            write_avg_profit_data_to_CSV(BOT_NAME, INITIAL_STACK, '{0}_{1}_average_profit_all_metrics.csv'.format(heuristic.__name__, opp_algo.__name__), 
+            heuristic_function=heuristic.__name__, opponent_algo=opp_algo.__name__)

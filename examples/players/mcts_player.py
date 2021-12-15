@@ -114,17 +114,21 @@ class MCTSPlayer(EmulatorPlayer):
 
     def declare_action(self, valid_actions, hole_card, round_state):
         # The below code is running the MCTS algorithm.
-        # print(round_state)
         actions_and_results = {action: 0 for action in ACTIONS}
         for action in actions_and_results:
             self.my_model.set_action(action)
-            self.player_model.set_action(action)
             emulator_game_state = self._setup_game_state(round_state, hole_card)
-            mcts_root = MCTSNode(self.emulator, emulator_game_state, self.uuid, hole_card, self.out_stack, simulation_model=self.player_model,
-                                 declare_action_args=[valid_actions, hole_card, round_state])
-            leaf_node = mcts_root
+            next_game_state, events = self.emulator.apply_action(emulator_game_state,
+                                                            *self.my_model.declare_action(valid_actions, hole_card,
+                                                                                          round_state))
+            new_args = None
+            if not is_terminal_state(next_game_state, self.uuid):
+                new_args = [events[-1]["valid_actions"], hole_card, events[-1]["round_state"]]
+            mcts_root = MCTSNode(self.emulator, next_game_state, self.uuid, hole_card, self.out_stack,
+                                 simulation_model=self.player_model, declare_action_args=new_args)
+
             for _ in range(self.number_of_playouts):
-                leaf_node = leaf_node.select_leaf()
+                leaf_node = mcts_root.select_leaf()
                 leaf_node.simulate_playout()
             
             actions_and_results[action] = mcts_root.get_node_value()
@@ -185,12 +189,17 @@ class MCTSNode:
         for a in ACTIONS:
             self.expansion_model.set_action(a)
             real_action, amount = self.expansion_model.declare_action(*self.declare_action_args)
-            new_state, events = self.emulator.apply_action(self.game_state, real_action, amount)
+            # print(real_action, amount)
+            new_state, events = self.emulator.apply_action(self.game_state, real_action, bet_amount=amount)
             if is_terminal_state(new_state, self.uuid):
-                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, self.initial_stack, simulation_model=self.simulation_model, parent=self))
+                # print("GENERATED TERMINAL STATE")
+                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, self.initial_stack,
+                                              simulation_model=self.simulation_model, parent=self))
             else:
                 new_args = [events[-1]["valid_actions"], self.hole_card, events[-1]["round_state"]]
-                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, self.initial_stack, simulation_model=self.simulation_model, declare_action_args=new_args, parent=self))
+                self.children.append(MCTSNode(self.emulator, new_state, self.uuid, self.hole_card, self.initial_stack,
+                                              simulation_model=self.simulation_model, declare_action_args=new_args,
+                                              parent=self))
             
     def select_leaf(self):
         """
@@ -199,7 +208,7 @@ class MCTSNode:
         """
         leaf = self
         while len(leaf.children) != 0:
-            leaf = self._get_max_child()
+            leaf = leaf._get_max_child()
         return leaf
 
     def _get_max_child(self):
