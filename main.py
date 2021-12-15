@@ -13,7 +13,7 @@ SMALL_BLIND = 5
 
 
 RESULTS_DIR = './gameplay_data/'
-NUM_GAMES = 30
+NUM_GAMES = 10
 
 
 def play_game_with_settings(max_rounds, num_other_players, opponent_player, result_file_name, num_playouts, heuristic_function):

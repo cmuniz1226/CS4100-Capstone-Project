@@ -53,4 +53,4 @@ def play_game_with_settings(max_rounds, num_other_players, opponent_player, resu
 
     print(result_data)
 
-play_game_with_settings(15, 1, RandomPlayer, None, 1000)
+play_game_with_settings(15, 1, HonestPlayer, None, 100000)

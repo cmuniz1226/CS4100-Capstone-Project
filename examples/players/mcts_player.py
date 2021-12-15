@@ -118,12 +118,14 @@ class MCTSPlayer(EmulatorPlayer):
         for action in actions_and_results:
             self.my_model.set_action(action)
             emulator_game_state = self._setup_game_state(round_state, hole_card)
-            next_game_state, _ = self.emulator.apply_action(emulator_game_state,
+            next_game_state, events = self.emulator.apply_action(emulator_game_state,
                                                             *self.my_model.declare_action(valid_actions, hole_card,
                                                                                           round_state))
+            new_args = None
+            if not is_terminal_state(next_game_state, self.uuid):
+                new_args = [events[-1]["valid_actions"], hole_card, events[-1]["round_state"]]
             mcts_root = MCTSNode(self.emulator, next_game_state, self.uuid, hole_card, self.out_stack,
-                                 simulation_model=self.player_model,
-                                 declare_action_args=[valid_actions, hole_card, round_state])
+                                 simulation_model=self.player_model, declare_action_args=new_args)
 
             for _ in range(self.number_of_playouts):
                 leaf_node = mcts_root.select_leaf()
